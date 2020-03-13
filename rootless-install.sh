@@ -1,5 +1,10 @@
 #!/bin/sh
-
+set -e
+# Docker CE for Linux installation script (Rootless mode)
+#
+# See https://docs.docker.com/engine/security/rootless/ for the
+# installation steps.
+#
 # This script is meant for quick & easy install via:
 #   $ curl -fsSL https://get.docker.com/rootless -o get-docker.sh
 #   $ sh get-docker.sh
@@ -15,10 +20,36 @@ SCRIPT_COMMIT_SHA=UNKNOWN
 
 # This script should be run with an unprivileged user and install/setup Docker under $HOME/bin/.
 
-set -e
+# The channel to install from:
+#   * nightly
+#   * stable
+DEFAULT_CHANNEL_VALUE="stable"
+if [ -z "$CHANNEL" ]; then
+	CHANNEL=$DEFAULT_CHANNEL_VALUE
+fi
+# The latest release is currently hard-coded.
+STABLE_LATEST="19.03.7"
+STATIC_RELEASE_URL=
+STATIC_RELEASE_ROOTLESS_URL=
+case "$CHANNEL" in
+    "stable")
+        echo "# Installing stable version ${STABLE_LATEST}"
+        STATIC_RELEASE_URL="https://download.docker.com/linux/static/$CHANNEL/$(uname -m)/docker-${STABLE_LATEST}.tgz"
+        STATIC_RELEASE_ROOTLESS_URL="https://download.docker.com/linux/static/$CHANNEL/$(uname -m)/docker-rootless-extras-${STABLE_LATEST}.tgz"
+        ;;
+    "nightly")
+        echo "# Installing nightly"
+        STATIC_RELEASE_URL="https://master.dockerproject.org/linux/$(uname -m)/docker.tgz"
+        STATIC_RELEASE_ROOTLESS_URL="https://master.dockerproject.org/linux/$(uname -m)/docker-rootless-extras.tgz"
+        ;;
+    *)
+        >&2 echo "Aborting because of unknown CHANNEL \"$CHANNEL\". Set \$CHANNEL to either \"stable\" or \"nightly\"."; exit 1
+        ;;
+esac
 
 init_vars() {
-	BIN="$HOME/bin"
+	BIN="${DOCKER_BIN:-$HOME/bin}"
+
 	DAEMON=dockerd
 	SYSTEMD=
 	if systemctl --user daemon-reload >/dev/null 2>&1; then
@@ -185,9 +216,9 @@ start_docker() {
 	fi
 
 	mkdir -p $HOME/.config/systemd/user
-	
+
 	DOCKERD_FLAGS="--experimental"
-	
+
 	if [ -n "$SKIP_IPTABLES" ]; then
 		DOCKERD_FLAGS="$DOCKERD_FLAGS --iptables=false"
 	fi
@@ -211,8 +242,8 @@ Description=Docker Application Container Engine (Rootless)
 Documentation=https://docs.docker.com
 
 [Service]
-Environment=PATH=$HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$HOME/bin/dockerd-rootless.sh $DOCKERD_FLAGS
+Environment=PATH=$BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=$BIN/dockerd-rootless.sh $DOCKERD_FLAGS
 ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutSec=0
 RestartSec=2
@@ -227,7 +258,7 @@ Delegate=yes
 Type=simple
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOT
 	systemctl --user daemon-reload
 	fi
@@ -304,11 +335,6 @@ do_install() {
 
 	tmp=$(mktemp -d)
 	trap "rm -rf $tmp" EXIT INT TERM
-	# Alternatively could find latest nightly release from https://download.docker.com/linux/static/nightly/ .
-	# Later we can provide different channels.
-	STATIC_RELEASE_URL="https://master.dockerproject.org/linux/x86_64/docker.tgz"
-	STATIC_RELEASE_ROOTLESS_URL="https://master.dockerproject.org/linux/x86_64/docker-rootless-extras.tgz"
-
 	# Download tarballs docker-* and docker-rootless-extras=*
 	(
 		cd "$tmp"
